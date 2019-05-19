@@ -1,4 +1,4 @@
-package govind;
+package govind.example;
 
 import org.apache.storm.Config;
 import org.apache.storm.LocalCluster;
