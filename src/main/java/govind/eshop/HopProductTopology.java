@@ -39,7 +39,7 @@ public class HopProductTopology {
 		} else {
 			LocalCluster localCluster = new LocalCluster();
 			localCluster.submitTopology("HopProductTopology", config, builder.createTopology());
-			Utils.sleep(30000);
+			Utils.sleep(30 * 60 * 1000);
 			localCluster.shutdown();
 		}
 	}

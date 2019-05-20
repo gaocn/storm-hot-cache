@@ -1,5 +1,7 @@
 package govind.eshop.bolt;
 
+import com.alibaba.fastjson.JSONArray;
+import govind.eshop.ZookeeperSession;
 import org.apache.commons.collections4.map.LRUMap;
 import org.apache.storm.task.OutputCollector;
 import org.apache.storm.task.TopologyContext;
@@ -21,9 +23,30 @@ public class ProductCountBolt extends BaseRichBolt {
 	 */
 	private LRUMap<Long, Long> productCountMap = new LRUMap<>(1000);
 
+	private int taskId;
 	@Override
 	public void prepare(Map stormConf, TopologyContext context, OutputCollector collector) {
+		this.taskId = context.getThisTaskId();
 		new Thread(new ProductCountThread()).start();
+		initTaskid(context.getThisTaskId());
+	}
+
+	/**
+	 * ProductCountBolt的所有Task在启动时，都会将自己的taskid写到同一个节
+	 * 点的值中，格式：逗号拼接的列表。
+	 * 并行运行并更新Znode中的内容，因此为了确保并发安全采用分布锁。
+	 */
+	private void initTaskid(int taskId) {
+		ZookeeperSession session = ZookeeperSession.getInstance();
+		session.acquireLock();
+		String taskIdList = session.getZnodeData();
+		if (!"".equals(taskIdList)) {
+			taskIdList += "," + taskId;
+		} else {
+			taskIdList += taskId;
+		}
+		session.setZnodeData(taskIdList);
+		session.releaseLock();
 	}
 
 	@Override
@@ -55,6 +78,10 @@ public class ProductCountBolt extends BaseRichBolt {
 			while (true) {
 				//每次都重新计算TopN
 				topN.clear();
+				if (productCountMap.size() == 0){
+					Utils.sleep(100);
+					continue;
+				}
 				for (Map.Entry<Long, Long> entry : productCountMap.entrySet()) {
 					if (topN.size() == 0) {
 						topN.add(entry);
@@ -80,6 +107,10 @@ public class ProductCountBolt extends BaseRichBolt {
 					}
 				}
 				System.err.println("Top " + N +"商品搜索次数如下：" + topN);
+				//获取TopN热门数据列表为字符串
+				String topNProductList = JSONArray.toJSONString(topN);
+				//幂等操作，每隔1分钟会将排名前三的信息发送到ZK中。
+				ZookeeperSession.getInstance().setZnodeData("/task-hot-product-list-" + taskId, topNProductList);
 				Utils.sleep(60 * 1000);
 			}
 		}
